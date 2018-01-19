@@ -1,4 +1,5 @@
 from collections import Counter
+import matplotlib.pyplot as plt
 from scipy import signal
 from scipy.io import wavfile
 from sphfile import SPHFile
@@ -85,8 +86,8 @@ class TIMITDataset(object):
         self.phon_to_id = {
             phon: i for i, (phon, _) in enumerate(self.all_phon_count.most_common())
         }
-        self.pid_to_phon = {v, k for k, v in self.phon_to_id}
-        self.wid_to_word = {v, k for k, v in self.word_to_id}
+        self.pid_to_phon = {v: k for k, v in self.phon_to_id.items()}
+        self.wid_to_word = {v: k for k, v in self.word_to_id.items()}
 
     def _parse_spkr_sent(self):
         self.spkr_sents = {}
@@ -172,4 +173,12 @@ if __name__ == "__main__":
     timit = TIMITDataset('./TIMIT')
     pp = pprint.PrettyPrinter(indent=4)
     pp.pprint(timit.stats())
-    pp.pprint(timit.get_sentence_data("CJF0", "SA1"))
+    wav, wrd, phn = timit.get_sentence_data("MRP0", "SA1")
+    print(wav)
+    frequencies, times, spectogram = signal.spectrogram(wav[1], wav[0], nfft=512, scaling='spectrum')
+
+    plt.pcolormesh(times, frequencies, spectogram)
+    plt.imshow(spectogram)
+    plt.ylabel('Frequency [Hz]')
+    plt.xlabel('Time [sec]')
+    plt.show()
