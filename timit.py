@@ -3,6 +3,7 @@ from scipy import signal
 from scipy.io import wavfile
 from sphfile import SPHFile
 import os
+import pprint
 
 class TIMITDataset(object):
     """/<CORPUS>/<USAGE>/<DIALECT>/<SEX><SPEAKER_ID>/<SENTENCE_ID>.<FILE_TYPE>"""
@@ -170,5 +171,8 @@ class TIMITDataset(object):
 
 if __name__ == "__main__":
     timit = TIMITDataset('./TIMIT')
-    print(timit.stats())
-    print(timit.get_sentence_data("CJF0", "SA1"))
+    pp = pprint.PrettyPrinter(indent=4)
+    pp.pprint(timit.stats())
+    pp.pprint(timit.get_sentence_data("CJF0", "SA1"))
+    pp.pprint(timit.all_phon_count)
+    pp.pprint(timit.all_word_count)
