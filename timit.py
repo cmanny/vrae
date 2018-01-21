@@ -1,11 +1,12 @@
 from collections import Counter
 import matplotlib.pyplot as plt
-from scipy import signal
 from scipy.io import wavfile
 from sphfile import SPHFile
 import os
 import pprint
 import pickle
+from utils import spectrogram
+import numpy as np
 
 class TIMITDataset(object):
     """/<CORPUS>/<USAGE>/<DIALECT>/<SEX><SPEAKER_ID>/<SENTENCE_ID>.<FILE_TYPE>"""
@@ -173,12 +174,26 @@ if __name__ == "__main__":
     timit = TIMITDataset('./TIMIT')
     pp = pprint.PrettyPrinter(indent=4)
     pp.pprint(timit.stats())
-    wav, wrd, phn = timit.get_sentence_data("MRP0", "SA1")
-    print(wav)
-    frequencies, times, spectogram = signal.spectrogram(wav[1], wav[0], nfft=512, scaling='spectrum')
+    (rate, data), wrd, phn = timit.get_sentence_data("MRP0", "SA1")
 
-    plt.pcolormesh(times, frequencies, spectogram)
-    plt.imshow(spectogram)
-    plt.ylabel('Frequency [Hz]')
-    plt.xlabel('Time [sec]')
+    fft_size = 1024
+    step_size = 16
+    thresh = 4
+    wav_spectrogram = spectrogram(
+        data.astype('float64'),
+        fft_size=fft_size,
+        step_size=step_size,
+        log=True,
+        thresh=thresh
+    )
+    fig, ax = plt.subplots(nrows=1,ncols=1, figsize=(10,3))
+    cax = ax.matshow(
+        np.transpose(wav_spectrogram),
+        interpolation='nearest',
+        aspect='auto',
+        cmap=plt.cm.viridis,
+        origin='lower'
+    )
+    fig.colorbar(cax)
+    plt.title('Spectrogram')
     plt.show()
