@@ -170,30 +170,46 @@ class TIMITDataset(object):
         wrd_file = os.path.join(folder, sid + ".WRD")
         return self._wav(wav_file), self._wrd(wrd_file), self._phn(phn_file)
 
+def plot_dict(d):
+    d_list = sorted(
+        d.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )
+
+    plt.bar(range(len(d)), [x[1] for x in d_list], align='center')
+    plt.tick_params(axis='both', which='major', labelsize=5)
+    plt.xticks(range(len(d)), [x[0] for x in d_list])
+
+    plt.show()
+
 if __name__ == "__main__":
     timit = TIMITDataset('./TIMIT')
-    pp = pprint.PrettyPrinter(indent=4)
-    pp.pprint(timit.stats())
-    (rate, data), wrd, phn = timit.get_sentence_data("MRP0", "SA1")
 
-    fft_size = 1024
-    step_size = 16
-    thresh = 4
-    wav_spectrogram = spectrogram(
-        data.astype('float64'),
-        fft_size=fft_size,
-        step_size=step_size,
-        log=True,
-        thresh=thresh
-    )
-    fig, ax = plt.subplots(nrows=1,ncols=1, figsize=(10,3))
-    cax = ax.matshow(
-        np.transpose(wav_spectrogram),
-        interpolation='nearest',
-        aspect='auto',
-        cmap=plt.cm.viridis,
-        origin='lower'
-    )
-    fig.colorbar(cax)
-    plt.title('Spectrogram')
-    plt.show()
+    plot_dict(timit.all_phon_count)
+
+    # pp = pprint.PrettyPrinter(indent=4)
+    # pp.pprint(timit.stats())
+    # (rate, data), wrd, phn = timit.get_sentence_data("MRP0", "SA1")
+    #
+    # fft_size = 1024
+    # step_size = 16
+    # thresh = 4
+    # wav_spectrogram = spectrogram(
+    #     data.astype('float64'),
+    #     fft_size=fft_size,
+    #     step_size=step_size,
+    #     log=True,
+    #     thresh=thresh
+    # )
+    # fig, ax = plt.subplots(nrows=1,ncols=1, figsize=(10,3))
+    # cax = ax.matshow(
+    #     np.transpose(wav_spectrogram),
+    #     interpolation='nearest',
+    #     aspect='auto',
+    #     cmap=plt.cm.viridis,
+    #     origin='lower'
+    # )
+    # fig.colorbar(cax)
+    # plt.title('Spectrogram')
+    # plt.show()
