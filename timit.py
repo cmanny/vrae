@@ -5,7 +5,7 @@ from sphfile import SPHFile
 import os
 import pprint
 import pickle
-from utils import spectrogram
+from signal_utils import spectrogram
 import numpy as np
 
 class TIMITDataset(object):
@@ -188,28 +188,28 @@ if __name__ == "__main__":
 
     plot_dict(timit.all_phon_count)
 
-    # pp = pprint.PrettyPrinter(indent=4)
-    # pp.pprint(timit.stats())
-    # (rate, data), wrd, phn = timit.get_sentence_data("MRP0", "SA1")
-    #
-    # fft_size = 1024
-    # step_size = 16
-    # thresh = 4
-    # wav_spectrogram = spectrogram(
-    #     data.astype('float64'),
-    #     fft_size=fft_size,
-    #     step_size=step_size,
-    #     log=True,
-    #     thresh=thresh
-    # )
-    # fig, ax = plt.subplots(nrows=1,ncols=1, figsize=(10,3))
-    # cax = ax.matshow(
-    #     np.transpose(wav_spectrogram),
-    #     interpolation='nearest',
-    #     aspect='auto',
-    #     cmap=plt.cm.viridis,
-    #     origin='lower'
-    # )
-    # fig.colorbar(cax)
-    # plt.title('Spectrogram')
-    # plt.show()
+    pp = pprint.PrettyPrinter(indent=4)
+    pp.pprint(timit.stats())
+    (rate, data), wrd, phn = timit.get_sentence_data("MRP0", "SA1")
+
+    fft_size = 1024
+    step_size = 16
+    thresh = 4
+    wav_spectrogram = spectrogram(  
+        data.astype('float64'),
+        fft_size=fft_size,
+        step_size=step_size,
+        log=True,
+        thresh=thresh
+    )
+    fig, ax = plt.subplots(nrows=1,ncols=1, figsize=(10,3))
+    cax = ax.matshow(
+        np.transpose(wav_spectrogram),
+        interpolation='nearest',
+        aspect='auto',
+        cmap=plt.cm.viridis,
+        origin='lower'
+    )
+    fig.colorbar(cax)
+    plt.title('Spectrogram')
+    plt.show()
