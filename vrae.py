@@ -38,8 +38,14 @@ class VRAE(object):
 
         # Launch the session
         self.sess = tf.InteractiveSession()
+
+        for var in tf.trainable_variables():
+            tf.summary.histogram(var.name, var)
+        self.summary_op = tf.summary.merge_all()
+
         self.sess.run(init)
-        self.saver = tf.train.Saver(tf.global_variables())
+        self.saver = tf.train.Saver(tf.global_variables(), max_to_keep=100)
+
 
     def _length(self, sequence):
         used = tf.sign(tf.reduce_max(tf.abs(sequence), 2))
@@ -134,7 +140,10 @@ class VRAE(object):
         )
         return loss, kl, rloss
 
-    def save(self, file_path, epoch):
+    def save(self, file_path='ckpt/default', epoch=1):
+        summary_writer = tf.summary.FileWriter(file_path, self.sess.graph)
+        summary_str = self.sess.run(self.summary_op)
+        summary_writer.add_summary(summary_str, 0)
         self.saver.save(self.sess, file_path, global_step=epoch)
 
     def load(self, file_path):
@@ -142,4 +151,5 @@ class VRAE(object):
         self.saver.restore(self.sess, file_path+'/'+ckpt.model_checkpoint_path)
 
 if __name__ == "__main__":
-    VRAE()
+    vrae = VRAE()
+    vrae.save()

@@ -2,3 +2,4 @@
 TIMIT
 *__pycache__*
 *cache*
+ckpt/*
