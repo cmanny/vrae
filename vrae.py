@@ -32,7 +32,7 @@ class VRAE(object):
             name="batch_input"
         )
         seq_output, z = self._build_model(self.batch_input)
-        self._build_loss_optimizer(seq_output, z)
+        self._build_loss_optimizer(seq_output)
 
         init = tf.global_variables_initializer()
 
@@ -73,6 +73,9 @@ class VRAE(object):
                 [LSTMCell(self.input_size) for _ in range(self.num_layers)]
             )
             initial_state = in_cell.zero_state(self.batch_size, dtype=tf.float32)
+
+            # using length we select the last output per sequence which
+            # represents the sequence encoding
             self.length = self._length(sequence)
             enc_outs, _ = tf.nn.dynamic_rnn(
                 in_cell,
@@ -80,7 +83,11 @@ class VRAE(object):
                 initial_state=initial_state,
                 sequence_length=self.length
             )
-            return enc_outs[tf.squeeze(self.length) - 1]
+            length = tf.squeeze(self.length)
+            return tf.gather_nd(
+                enc_outs,
+                tf.stack([tf.range(self.batch_size), length - 1], axis=1)
+            )
 
     def _rnn_decoder(self, state):
         with tf.variable_scope("sequence_decoder"):
@@ -91,6 +98,8 @@ class VRAE(object):
             inputs = tf.zeros(
                 (self.batch_size, tf.reduce_max(self.length), self.input_size)
             )
+            # dyanmic rnn runs through zeros to max sequence _length
+            # must ignore subsequent elements in shorter sequences
             dec_outs, _ = tf.nn.dynamic_rnn(
                 out_cell,
                 inputs=inputs,
@@ -103,25 +112,46 @@ class VRAE(object):
     def _build_model(self, sequence_input):
         sequence_vector = self._rnn_encoder(sequence_input)
         self.in_mean, self.in_log_var = self._recognizer(sequence_vector)
+
+        # # Sample step
         epsilon = tf.random_normal(
             [self.batch_size, self.latent_size],
             0, 1, dtype=tf.float32
         )
         self.z = self.in_mean + epsilon * tf.sqrt(tf.exp(self.in_log_var))
+        # #
+
         decoded_state = self._generator(self.z)
         self.sequence_output = self._rnn_decoder(decoded_state)
+
         return self.sequence_output, self.z
 
-    def _build_loss_optimizer(self, sequence_output, z):
+    def _build_loss_optimizer(self, sequence_output):
         with tf.name_scope("optimizer"):
-            out_flatten = tf.reshape(sequence_output, [self.batch_size, -1])
-            in_flatten = tf.reshape(self.batch_input, [self.batch_size, -1])
+            #L2 distance for input to output
+            dist = self.batch_input - sequence_output * tf.sign(tf.abs(self.batch_input))
+            d2 = .5 * dist ** 2
+            # Calculate a per window loss per example
+            self.reconstr_loss = tf.reduce_mean(
+                tf.reduce_sum(d2, [1, 2]) / tf.cast(self.length, tf.float32)
+            )
 
-            #L2 distance
-            dist = out_flatten - in_flatten
-            d2 = dist * dist * 2
-            self.reconstr_loss = tf.reduce_mean(tf.reduce_sum(d2, 1))
-            self.kl_divergence = 0
+            # We want to match p = N(0, 1) with q = N(in_mean, in_var)
+            # using the KL divergence
+            self.kl_divergence = .5 * tf.reduce_mean(
+                self.in_log_var
+                + (1 + self.in_mean ** 2) / tf.exp(self.in_log_var)
+                - 1
+            )
+            # Alternatively use the reverse-KL
+            # self.kl_divergence = .5 * tf.reduce_mean(
+            #     - self.in_log_var
+            #     + (self.in_mean ** 2)
+            #     + tf.exp(self.in_log_var)
+            #     - 1
+            # )
+
+            # Total loss, could use beta value to play with beta-vae
             self.loss = self.reconstr_loss + self.kl_divergence
             self.t_vars = tf.trainable_variables()
             self.optimizer = tf.train.AdamOptimizer(
@@ -131,9 +161,9 @@ class VRAE(object):
 
     def train_batch(self, batch):
         loss, kl, rloss = self.sess.run(
-            self.loss,
+            (self.loss,
             self.kl_divergence,
-            self.reconstr_loss,
+            self.reconstr_loss),
             feed_dict={
                 self.batch_input: batch
             }

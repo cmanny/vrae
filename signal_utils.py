@@ -32,19 +32,16 @@ def overlap(X, window_size, window_step):
     ws = window_size
     ss = window_step
     a = X
-    print(X.dtype)
 
     valid = len(a) - ws
     nw = (valid) // ss
     out = np.ndarray((nw,ws),dtype = a.dtype)
-    print(nw, ws, ss)
 
     for i in range(nw):
         # "slide" the window along the samples
         start = i * ss
         stop = start + ws
         out[i] = a[start : stop]
-    print(out.shape)
 
     return out
 

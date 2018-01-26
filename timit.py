@@ -7,6 +7,8 @@ import pprint
 import pickle
 from signal_utils import spectrogram
 import numpy as np
+from random import shuffle
+from queue import Queue
 
 class TIMITDataset(object):
     """/<CORPUS>/<USAGE>/<DIALECT>/<SEX><SPEAKER_ID>/<SENTENCE_ID>.<FILE_TYPE>"""
@@ -170,6 +172,29 @@ class TIMITDataset(object):
         wrd_file = os.path.join(folder, sid + ".WRD")
         return self._wav(wav_file), self._wrd(wrd_file), self._phn(phn_file)
 
+    def batch_generator(self, batch_size, num_epochs=1):
+        for _ in range(num_epochs):
+            shuffled_list = [
+                (spk_id, t + sent_id)
+                for spk_id, dic in self.spkr_sents.items()
+                for t, l in dic.items()
+                for sent_id in l
+            ]
+            shuffle(shuffled_list)
+            unused_queue = Queue()
+            for x in shuffled_list:
+                unused_queue.put(x)
+            while not unused_queue.empty():
+                items = [
+                    unused_queue.get()
+                    for _ in range(min(batch_size, unused_queue.qsize()))
+                ]
+                yield [self.get_sentence_data(x[0], x[1]) for x in items]
+        yield None
+
+
+
+
 def plot_dict(d):
     d_list = sorted(
         d.items(),
@@ -184,32 +209,36 @@ def plot_dict(d):
     plt.show()
 
 if __name__ == "__main__":
-    timit = TIMITDataset('./TIMIT')
-
-    plot_dict(timit.all_phon_count)
-
     pp = pprint.PrettyPrinter(indent=4)
+    timit = TIMITDataset('./TIMIT')
     pp.pprint(timit.stats())
-    (rate, data), wrd, phn = timit.get_sentence_data("MRP0", "SA1")
+    batch = timit.batch_generator(32)
+    for _ in range(1):
+        pp.pprint(next(batch))
 
-    fft_size = 1024
-    step_size = 16
-    thresh = 4
-    wav_spectrogram = spectrogram(  
-        data.astype('float64'),
-        fft_size=fft_size,
-        step_size=step_size,
-        log=True,
-        thresh=thresh
-    )
-    fig, ax = plt.subplots(nrows=1,ncols=1, figsize=(10,3))
-    cax = ax.matshow(
-        np.transpose(wav_spectrogram),
-        interpolation='nearest',
-        aspect='auto',
-        cmap=plt.cm.viridis,
-        origin='lower'
-    )
-    fig.colorbar(cax)
-    plt.title('Spectrogram')
-    plt.show()
+
+    #plot_dict(timit.all_phon_count)
+
+    # (rate, data), wrd, phn = timit.get_sentence_data("MRP0", "SA1")
+    #
+    # fft_size = 1024
+    # step_size = 16
+    # thresh = 4
+    # wav_spectrogram = spectrogram(
+    #     data.astype('float64'),
+    #     fft_size=fft_size,
+    #     step_size=step_size,
+    #     log=True,
+    #     thresh=thresh
+    # )
+    # fig, ax = plt.subplots(nrows=1,ncols=1, figsize=(10,3))
+    # cax = ax.matshow(
+    #     np.transpose(wav_spectrogram),
+    #     interpolation='nearest',
+    #     aspect='auto',
+    #     cmap=plt.cm.viridis,
+    #     origin='lower'
+    # )
+    # fig.colorbar(cax)
+    # plt.title('Spectrogram')
+    # plt.show()
