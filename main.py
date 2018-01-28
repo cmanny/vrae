@@ -6,7 +6,7 @@ import numpy as np
 if __name__ == "__main__":
     timit = TIMITDataset('./TIMIT')
     #timit.preprocess_spectrograms()
-    batch_size = 32
+    batch_size = 10
     vrae = VRAE(
         input_size=512,
         batch_size=batch_size,
@@ -19,7 +19,7 @@ if __name__ == "__main__":
 
     batch = timit.batch_generator(batch_size)
     avg_loss = 0
-    for i in range(1000):
+    for i in range(100):
         batch_input = [example[0] for example in next(batch)]
         max_seq_length = max(x.shape[0] for x in batch_input)
         bi_arr = np.zeros((batch_size, max_seq_length, 512))

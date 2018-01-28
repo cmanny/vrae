@@ -2,7 +2,7 @@ import tensorflow as tf
 import os
 
 from tensorflow.contrib.rnn import LSTMCell, MultiRNNCell, LSTMStateTuple
-from tf_ops import linear
+from tf_ops import linear, batch_norm
 
 # Adapted from https://github.com/RobRomijnders/AE_ts/blob/master/AE_ts_model.py
 # and https://github.com/hardmaru/diff-vae-tensorflow/blob/master/model.py
@@ -18,7 +18,7 @@ class VRAE(object):
                 input_size=512,
                 hidden_size=128,
                 sequence_lengths=None,
-                learning_rate=0.005):
+                learning_rate=0.001):
         self.latent_size = latent_size
         self.num_layers = num_layers
         self.batch_size = batch_size
@@ -110,7 +110,8 @@ class VRAE(object):
 
 
     def _build_model(self, sequence_input):
-        sequence_vector = self._rnn_encoder(sequence_input)
+        bn = batch_norm(32)
+        sequence_vector = self._rnn_encoder(bn(sequence_input))
         self.in_mean, self.in_log_var = self._recognizer(sequence_vector)
 
         # # Sample step
@@ -121,7 +122,7 @@ class VRAE(object):
         self.z = self.in_mean + epsilon * tf.sqrt(tf.exp(self.in_log_var))
         # #
 
-        decoded_state = self._generator(self.in_mean)
+        decoded_state = self._generator(self.z)
         self.sequence_output = self._rnn_decoder(decoded_state)
 
         return self.sequence_output, self.z
@@ -152,7 +153,7 @@ class VRAE(object):
             # )
 
             # Total loss, could use beta value to play with beta-vae
-            self.loss = self.reconstr_loss #+ self.kl_divergence
+            self.loss = self.reconstr_loss + .01 * self.kl_divergence
             tvars = tf.trainable_variables()
             grads = tf.gradients(self.loss, tvars)
             grads, _ = tf.clip_by_global_norm(grads, 4)
@@ -163,8 +164,9 @@ class VRAE(object):
 
 
     def train_batch(self, batch):
-        loss, kl, rloss = self.sess.run(
-            (self.loss,
+        opt, loss, kl, rloss = self.sess.run(
+            (self.train_step,
+            self.loss,
             self.kl_divergence,
             self.reconstr_loss),
             feed_dict={
