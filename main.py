@@ -5,6 +5,7 @@ import numpy as np
 
 if __name__ == "__main__":
     timit = TIMITDataset('./TIMIT')
+    #timit.preprocess_spectrograms()
     batch_size = 32
     vrae = VRAE(
         input_size=512,
@@ -17,22 +18,14 @@ if __name__ == "__main__":
     thresh = 4
 
     batch = timit.batch_generator(batch_size)
+    avg_loss = 0
     for i in range(1000):
-        next_batch = next(batch)
-        batch_input = []
-        for example in next_batch:
-            wav = example[0][1]
-            wav_spectrogram = spectrogram(
-                wav.astype('float64'),
-                fft_size=fft_size*2,
-                step_size=step_size,
-                log=True,
-                thresh=thresh
-            )
-            batch_input.append(wav_spectrogram)
+        batch_input = [example[0] for example in next(batch)]
         max_seq_length = max(x.shape[0] for x in batch_input)
         bi_arr = np.zeros((batch_size, max_seq_length, 512))
-        for i, example in enumerate(batch_input):
-            bi_arr[i, :example.shape[0], :example.shape[1]] = example
-        print("Batch {}, loss: {}, kl:{}, rloss:{}".format(i, *vrae.train_batch(bi_arr)))
+        for j, example in enumerate(batch_input):
+            bi_arr[j, :example.shape[0], :example.shape[1]] = example
+        loss, kl, rloss = vrae.train_batch(bi_arr)
+        avg_loss = (avg_loss * i + loss) / (i + 1)
+        print("Batch {}, loss: {}, kl:{}, rloss:{}, avg_loss:{}".format(i, loss, kl, rloss, avg_loss))
     vrae.save()

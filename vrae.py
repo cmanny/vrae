@@ -14,11 +14,11 @@ class VRAE(object):
     def __init__(self,
                 batch_size=32,
                 latent_size=20,
-                num_layers=1,
-                input_size=1024,
+                num_layers=2,
+                input_size=512,
                 hidden_size=128,
                 sequence_lengths=None,
-                learning_rate=0.001):
+                learning_rate=0.005):
         self.latent_size = latent_size
         self.num_layers = num_layers
         self.batch_size = batch_size
@@ -56,15 +56,17 @@ class VRAE(object):
     def _recognizer(self, x):
         with tf.name_scope("recognizer") as scope:
             hidden = tf.nn.softplus(linear(x, self.hidden_size, 'r_x_to_hidden'))
-            mean = linear(hidden, self.latent_size, 'r_hidden_to_mean')
-            log_var = linear(hidden, self.latent_size, 'r_hidden_to_var')
+            hidden2 = tf.nn.softplus(linear(hidden, self.hidden_size, 'r_hidden_to_hidden'))
+            mean = linear(hidden2, self.latent_size, 'r_hidden_to_mean')
+            log_var = linear(hidden2, self.latent_size, 'r_hidden_to_var')
             return mean, log_var
 
 
     def _generator(self, z):
         with tf.name_scope("generator") as scope:
             hidden = tf.nn.softplus(linear(z, self.hidden_size, 'g_z_to_hidden'))
-            self.x_reconstructed = linear(hidden, self.input_size, 'g_hidden_to_x')
+            hidden2 = tf.nn.softplus(linear(hidden, self.hidden_size, 'g_hidden_to_hidden'))
+            self.x_reconstructed = linear(hidden2, self.input_size, 'g_hidden_to_x')
             return self.x_reconstructed
 
     def _rnn_encoder(self, sequence):
@@ -119,7 +121,7 @@ class VRAE(object):
         self.z = self.in_mean + epsilon * tf.sqrt(tf.exp(self.in_log_var))
         # #
 
-        decoded_state = self._generator(self.z)
+        decoded_state = self._generator(self.in_mean)
         self.sequence_output = self._rnn_decoder(decoded_state)
 
         return self.sequence_output, self.z
@@ -131,7 +133,7 @@ class VRAE(object):
             d2 = .5 * dist ** 2
             # Calculate a per window loss per example
             self.reconstr_loss = tf.reduce_mean(
-                tf.reduce_sum(d2, [1, 2]) / tf.cast(self.length, tf.float32)
+                tf.reduce_sum(d2, [1, 2]) / tf.cast(self.length, tf.float32) / self.input_size
             )
 
             # We want to match p = N(0, 1) with q = N(in_mean, in_var)
@@ -150,11 +152,14 @@ class VRAE(object):
             # )
 
             # Total loss, could use beta value to play with beta-vae
-            self.loss = self.reconstr_loss + self.kl_divergence
-            self.t_vars = tf.trainable_variables()
-            self.optimizer = tf.train.AdamOptimizer(
-                self.learning_rate
-            ).minimize(self.loss, var_list=self.t_vars)
+            self.loss = self.reconstr_loss #+ self.kl_divergence
+            tvars = tf.trainable_variables()
+            grads = tf.gradients(self.loss, tvars)
+            grads, _ = tf.clip_by_global_norm(grads, 4)
+            # And apply the gradients
+            optimizer = tf.train.AdamOptimizer(self.learning_rate)
+            gradients = zip(grads, tvars)
+            self.train_step = optimizer.apply_gradients(gradients)
 
 
     def train_batch(self, batch):

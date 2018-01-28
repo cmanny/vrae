@@ -9,15 +9,26 @@ from signal_utils import spectrogram
 import numpy as np
 from random import shuffle
 from queue import Queue
+from contextlib import closing
+from multiprocessing import Pool, cpu_count
 
 class TIMITDataset(object):
     """/<CORPUS>/<USAGE>/<DIALECT>/<SEX><SPEAKER_ID>/<SENTENCE_ID>.<FILE_TYPE>"""
 
-    def __init__(self, base_path, force_reparse=False):
+    def __init__(self,
+                base_path,
+                force_reparse=False,
+                fft_size=512,
+                window_size=16,
+                thresh=4):
         self.base_path = base_path
         self.inner_path = "data/lisa/data/timit/raw/TIMIT"
         self.full_path = os.path.join(self.base_path, self.inner_path)
         self.force_reparse = force_reparse
+
+        self.fft_size = fft_size
+        self.window_size = window_size
+        self.thresh = thresh
 
         self.dict_path = os.path.join(self.full_path, "DOC", "TIMITDIC.TXT")
         self.prompt_path = os.path.join(self.full_path, "DOC", "PROMPT.TXT")
@@ -155,7 +166,7 @@ class TIMITDataset(object):
                 phn_list.append((s, e, phn))
         return phn_list
 
-    def get_sentence_data(self, speaker, sid):
+    def get_sentence_data(self, speaker, sid, spec=False):
         # Because the TIMIT dataset uses the NIST SPHERE header we
         # first convert it into a standard WAV if we have not already
         spkr = self.speakers[speaker]
@@ -170,26 +181,60 @@ class TIMITDataset(object):
             sph = SPHFile(sph_wav_file)
             sph.write_wav(wav_file)
         wrd_file = os.path.join(folder, sid + ".WRD")
-        return self._wav(wav_file), self._wrd(wrd_file), self._phn(phn_file)
+        spec_ext = "_{}_{}_{}".format(self.fft_size, self.window_size, self.thresh)
+        spec_file = os.path.join(folder, sid + ".SPEC" + spec_ext)
+        data = None
+        if spec:
+            if not os.path.exists(spec_file + ".npy"):
+                wav = self._wav(wav_file)[1]
+                data = wav_spectrogram = spectrogram(
+                    wav.astype('float64'),
+                    fft_size=self.fft_size*2,
+                    step_size=self.window_size,
+                    log=True,
+                    thresh=self.thresh
+                )
+                np.save(spec_file, wav_spectrogram)
+            else:
+                data = np.load(spec_file + ".npy")
+        else:
+            data = self._wav(wav_file)
 
-    def batch_generator(self, batch_size):
+        return data, self._wrd(wrd_file), self._phn(phn_file)
+
+    def _spkr_sent_list(self, only_type=None):
+        return [
+            (spk_id, t + sent_id)
+            for spk_id, dic in self.spkr_sents.items()
+            for t, l in dic.items() if only_type == None or t == only_type
+            for sent_id in l
+        ]
+
+    def _make_spectrograms(self, l):
+        for sp in l:
+            self.get_sentence_data(sp[0], sp[1], spec=True)
+            print("{} spectrogram complete".format(sp))
+
+    def preprocess_spectrograms(self):
+        l = self._spkr_sent_list()
+        num_cpus = cpu_count()
+        cs = len(l) // cpu_count()
+        splits = [l[i:min(i + cs, len(l))] for i in range(0, len(l), cs)]
+        with closing(Pool(processes=num_cpus)) as pool:
+            pool.map(self._make_spectrograms, splits)
+
+    def batch_generator(self, batch_size, spec=True):
         while True:
-            shuffled_list = [
-                (spk_id, t + sent_id)
-                for spk_id, dic in self.spkr_sents.items()
-                for t, l in dic.items()
-                for sent_id in l
-            ]
+            shuffled_list = self._spkr_sent_list(only_type="SA")
             shuffle(shuffled_list)
             unused_queue = Queue()
             for x in shuffled_list:
                 unused_queue.put(x)
             while not unused_queue.empty():
-                items = [
-                    unused_queue.get()
-                    for _ in range(min(batch_size, unused_queue.qsize()))
-                ]
-                yield [self.get_sentence_data(x[0], x[1]) for x in items]
+                if unused_queue.qsize() < batch_size:
+                    break
+                items = [unused_queue.get() for _ in range(batch_size)]
+                yield [self.get_sentence_data(x[0], x[1], spec=spec) for x in items]
         yield None
 
 
