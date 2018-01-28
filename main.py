@@ -5,7 +5,7 @@ import numpy as np
 
 if __name__ == "__main__":
     timit = TIMITDataset('./TIMIT')
-    batch_size = 2
+    batch_size = 32
     vrae = VRAE(
         input_size=512,
         batch_size=batch_size,
@@ -17,7 +17,7 @@ if __name__ == "__main__":
     thresh = 4
 
     batch = timit.batch_generator(batch_size)
-    for i in range(1):
+    for i in range(1000):
         next_batch = next(batch)
         batch_input = []
         for example in next_batch:

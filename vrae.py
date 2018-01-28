@@ -95,9 +95,7 @@ class VRAE(object):
                 [LSTMCell(self.input_size) for _ in range(self.num_layers)]
             )
             initial_state = (LSTMStateTuple(state, state),) * self.num_layers
-            inputs = tf.zeros(
-                (self.batch_size, tf.reduce_max(self.length), self.input_size)
-            )
+            inputs = tf.zeros_like(self.batch_input)
             # dyanmic rnn runs through zeros to max sequence _length
             # must ignore subsequent elements in shorter sequences
             dec_outs, _ = tf.nn.dynamic_rnn(

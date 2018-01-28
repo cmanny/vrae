@@ -172,8 +172,8 @@ class TIMITDataset(object):
         wrd_file = os.path.join(folder, sid + ".WRD")
         return self._wav(wav_file), self._wrd(wrd_file), self._phn(phn_file)
 
-    def batch_generator(self, batch_size, num_epochs=1):
-        for _ in range(num_epochs):
+    def batch_generator(self, batch_size):
+        while True:
             shuffled_list = [
                 (spk_id, t + sent_id)
                 for spk_id, dic in self.spkr_sents.items()
