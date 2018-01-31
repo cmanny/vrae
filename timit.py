@@ -194,9 +194,9 @@ class TIMITDataset(object):
                     log=True,
                     thresh=self.thresh
                 )
-                np.save(spec_file, wav_spectrogram)
-            else:
-                data = np.load(spec_file + ".npy")
+            #     np.save(spec_file, wav_spectrogram)
+            # else:
+            #     data = np.load(spec_file + ".npy")
         else:
             data = self._wav(wav_file)
 

@@ -3,6 +3,7 @@ import os
 
 from tensorflow.contrib.rnn import LSTMCell, MultiRNNCell, LSTMStateTuple
 from tf_ops import linear, batch_norm
+import numpy as np
 
 # Adapted from https://github.com/RobRomijnders/AE_ts/blob/master/AE_ts_model.py
 # and https://github.com/hardmaru/diff-vae-tensorflow/blob/master/model.py
@@ -13,12 +14,13 @@ class VRAE(object):
 
     def __init__(self,
                 batch_size=32,
-                latent_size=20,
-                num_layers=2,
+                latent_size=32,
+                num_layers=1,
                 input_size=512,
                 hidden_size=128,
                 sequence_lengths=None,
-                learning_rate=0.001):
+                learning_rate=0.001,
+                save_path="ckpt/default"):
         self.latent_size = latent_size
         self.num_layers = num_layers
         self.batch_size = batch_size
@@ -34,24 +36,15 @@ class VRAE(object):
         seq_output, z = self._build_model(self.batch_input)
         self._build_loss_optimizer(seq_output)
 
-        init = tf.global_variables_initializer()
 
         # Launch the session
         self.sess = tf.InteractiveSession()
-
-        for var in tf.trainable_variables():
-            tf.summary.histogram(var.name, var)
         self.summary_op = tf.summary.merge_all()
 
+        init = tf.global_variables_initializer()
         self.sess.run(init)
         self.saver = tf.train.Saver(tf.global_variables(), max_to_keep=100)
-
-
-    def _length(self, sequence):
-        used = tf.sign(tf.reduce_max(tf.abs(sequence), 2))
-        length = tf.reduce_sum(used, 1)
-        length = tf.cast(length, tf.int32)
-        return length
+        self.summary_writer = tf.summary.FileWriter(save_path, self.sess.graph)
 
     def _recognizer(self, x):
         with tf.name_scope("recognizer") as scope:
@@ -74,20 +67,22 @@ class VRAE(object):
             in_cell = MultiRNNCell(
                 [LSTMCell(self.input_size) for _ in range(self.num_layers)]
             )
-            initial_state = in_cell.zero_state(self.batch_size, dtype=tf.float32)
+            state = tf.random_normal((self.batch_size, self.input_size))
+            initial_state = (LSTMStateTuple(state, state),) * self.num_layers
 
             # using length we select the last output per sequence which
             # represents the sequence encoding
-            self.length = self._length(sequence)
-            enc_outs, _ = tf.nn.dynamic_rnn(
+            self.length = tf.placeholder(tf.int32, shape=(self.batch_size,), name="lengths")
+            self.enc_outs, self.enc_state = tf.nn.dynamic_rnn(
                 in_cell,
                 inputs=sequence,
-                initial_state=initial_state,
-                sequence_length=self.length
+                #initial_state=initial_state,
+                sequence_length=self.length,
+                dtype=tf.float32
             )
             length = tf.squeeze(self.length)
             return tf.gather_nd(
-                enc_outs,
+                self.enc_outs,
                 tf.stack([tf.range(self.batch_size), length - 1], axis=1)
             )
 
@@ -96,23 +91,29 @@ class VRAE(object):
             out_cell = MultiRNNCell(
                 [LSTMCell(self.input_size) for _ in range(self.num_layers)]
             )
+            # state = tf.random_normal((self.batch_size, self.input_size))
             initial_state = (LSTMStateTuple(state, state),) * self.num_layers
-            inputs = tf.zeros_like(self.batch_input)
+            #initial_state = out_cell.zero_state(self.batch_size, tf.float32)
+            inputs = tf.random_normal((self.batch_size, tf.reduce_max(self.length), self.input_size))
+
             # dyanmic rnn runs through zeros to max sequence _length
             # must ignore subsequent elements in shorter sequences
             dec_outs, _ = tf.nn.dynamic_rnn(
                 out_cell,
                 inputs=inputs,
                 initial_state=initial_state,
-                sequence_length=self.length
+                sequence_length=self.length,
+                dtype=tf.float32
             )
             return dec_outs
 
 
     def _build_model(self, sequence_input):
-        bn = batch_norm(32)
-        sequence_vector = self._rnn_encoder(bn(sequence_input))
+        bn = batch_norm(self.batch_size)
+        sequence_vector = self._rnn_encoder(tf.exp(sequence_input))
         self.in_mean, self.in_log_var = self._recognizer(sequence_vector)
+        tf.summary.histogram("in_mean", self.in_mean)
+        tf.summary.histogram("in_log_var", self.in_log_var)
 
         # # Sample step
         epsilon = tf.random_normal(
@@ -120,6 +121,7 @@ class VRAE(object):
             0, 1, dtype=tf.float32
         )
         self.z = self.in_mean + epsilon * tf.sqrt(tf.exp(self.in_log_var))
+        tf.summary.histogram("z", self.z)
         # #
 
         decoded_state = self._generator(self.z)
@@ -130,11 +132,16 @@ class VRAE(object):
     def _build_loss_optimizer(self, sequence_output):
         with tf.name_scope("optimizer"):
             #L2 distance for input to output
-            dist = self.batch_input - sequence_output * tf.sign(tf.abs(self.batch_input))
+            dist = tf.exp(self.batch_input) - sequence_output
             d2 = .5 * dist ** 2
+            tf.summary.image("input", tf.expand_dims(self.batch_input, 3), max_outputs=1)
+            tf.summary.image("dist", tf.expand_dims(d2, 3), max_outputs=1)
+            tf.summary.image("output", tf.expand_dims(sequence_output, 3), max_outputs=1)
+            tf.summary.image("enc_outs", tf.expand_dims(self.enc_outs, 3), max_outputs=1)
             # Calculate a per window loss per example
+
             self.reconstr_loss = tf.reduce_mean(
-                tf.reduce_sum(d2, [1, 2]) / tf.cast(self.length, tf.float32) / self.input_size
+                tf.reduce_sum(d2, [2, 1]) / tf.cast(self.length, tf.float32) / self.input_size
             )
 
             # We want to match p = N(0, 1) with q = N(in_mean, in_var)
@@ -153,33 +160,42 @@ class VRAE(object):
             # )
 
             # Total loss, could use beta value to play with beta-vae
-            self.loss = self.reconstr_loss + .01 * self.kl_divergence
+            self.loss = self.reconstr_loss + self.kl_divergence
             tvars = tf.trainable_variables()
             grads = tf.gradients(self.loss, tvars)
             grads, _ = tf.clip_by_global_norm(grads, 4)
+
+
+            global_step = tf.Variable(0, trainable=False)
+            lr = tf.train.exponential_decay(self.learning_rate, global_step, 100, 0.9, staircase=False)
             # And apply the gradients
             optimizer = tf.train.AdamOptimizer(self.learning_rate)
             gradients = zip(grads, tvars)
-            self.train_step = optimizer.apply_gradients(gradients)
+            self.train_step = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss, var_list=tvars)
+            increment_global_step_op = tf.assign(global_step, global_step+1)
+
+            tf.summary.scalar("total_loss", self.loss)
+            tf.summary.scalar("kl_divergence", self.kl_divergence)
+            tf.summary.scalar("reconstruction_loss", self.reconstr_loss)
 
 
-    def train_batch(self, batch):
-        opt, loss, kl, rloss = self.sess.run(
-            (self.train_step,
+    def train_batch(self, batch, lengths, i):
+        summary, opt, loss, kl, rloss, length = self.sess.run(
+            (self.summary_op,
+            self.train_step,
             self.loss,
             self.kl_divergence,
-            self.reconstr_loss),
+            self.reconstr_loss,
+            self.length),
             feed_dict={
-                self.batch_input: batch
+                self.batch_input: batch,
+                self.length: lengths
             }
         )
+        print(length)
+        self.summary_writer.add_summary(summary, i)
+        #self.saver.save(self.sess, file_path, global_step=step)
         return loss, kl, rloss
-
-    def save(self, file_path='ckpt/default', epoch=1):
-        summary_writer = tf.summary.FileWriter(file_path, self.sess.graph)
-        summary_str = self.sess.run(self.summary_op)
-        summary_writer.add_summary(summary_str, 0)
-        self.saver.save(self.sess, file_path, global_step=epoch)
 
     def load(self, file_path):
         ckpt = tf.train.get_checkpoint_state(file_path)
