@@ -58,7 +58,7 @@ class VRAE(object):
     def _generator(self, z):
         with tf.name_scope("generator") as scope:
             hidden = tf.nn.softplus(linear(z, self.hidden_size, 'g_z_to_hidden'))
-            hidden2 = tf.nn.softplus(linear(hidden, self.hidden_size, 'g_hidden_to_hidden'))
+            hidden2 = tf.nn.tanh(linear(hidden, self.hidden_size, 'g_hidden_to_hidden'))
             self.x_reconstructed = linear(hidden2, self.input_size, 'g_hidden_to_x')
             return self.x_reconstructed
 
@@ -69,6 +69,7 @@ class VRAE(object):
             )
             state = tf.random_normal((self.batch_size, self.input_size))
             initial_state = (LSTMStateTuple(state, state),) * self.num_layers
+            #initial_state = in_cell.zero_state(self.batch_size, tf.float32)
 
             # using length we select the last output per sequence which
             # represents the sequence encoding
@@ -76,7 +77,7 @@ class VRAE(object):
             self.enc_outs, self.enc_state = tf.nn.dynamic_rnn(
                 in_cell,
                 inputs=sequence,
-                #initial_state=initial_state,
+                initial_state=initial_state,
                 sequence_length=self.length,
                 dtype=tf.float32
             )
@@ -92,9 +93,13 @@ class VRAE(object):
                 [LSTMCell(self.input_size) for _ in range(self.num_layers)]
             )
             # state = tf.random_normal((self.batch_size, self.input_size))
-            initial_state = (LSTMStateTuple(state, state),) * self.num_layers
-            #initial_state = out_cell.zero_state(self.batch_size, tf.float32)
-            inputs = tf.random_normal((self.batch_size, tf.reduce_max(self.length), self.input_size))
+            #initial_state = (LSTMStateTuple(state, state),) * self.num_layers
+            initial_state = out_cell.zero_state(self.batch_size, tf.float32)
+            #inputs = tf.random_normal((self.batch_size, tf.reduce_max(self.length), self.input_size))
+            inputs = tf.concat([
+                tf.expand_dims(state, 1),
+                tf.zeros((self.batch_size, tf.reduce_max(self.length) - 1, self.input_size))
+            ], axis=1)
 
             # dyanmic rnn runs through zeros to max sequence _length
             # must ignore subsequent elements in shorter sequences
@@ -110,7 +115,7 @@ class VRAE(object):
 
     def _build_model(self, sequence_input):
         bn = batch_norm(self.batch_size)
-        sequence_vector = self._rnn_encoder(tf.exp(sequence_input))
+        sequence_vector = self._rnn_encoder(sequence_input)
         self.in_mean, self.in_log_var = self._recognizer(sequence_vector)
         tf.summary.histogram("in_mean", self.in_mean)
         tf.summary.histogram("in_log_var", self.in_log_var)
@@ -132,7 +137,7 @@ class VRAE(object):
     def _build_loss_optimizer(self, sequence_output):
         with tf.name_scope("optimizer"):
             #L2 distance for input to output
-            dist = tf.exp(self.batch_input) - sequence_output
+            dist = tf.exp(self.batch_input) - sequence_output * tf.sign(tf.abs(self.batch_input))
             d2 = .5 * dist ** 2
             tf.summary.image("input", tf.expand_dims(self.batch_input, 3), max_outputs=1)
             tf.summary.image("dist", tf.expand_dims(d2, 3), max_outputs=1)

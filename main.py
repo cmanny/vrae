@@ -5,16 +5,16 @@ import numpy as np
 import time
 
 if __name__ == "__main__":
-    timit = TIMITDataset('./TIMIT', fft_size=128, window_size=2048, thresh=3)
+    timit = TIMITDataset('./TIMIT', fft_size=128, window_size=128, thresh=3)
     #timit.preprocess_spectrograms()
-    batch_size = 10
+    batch_size = 2
     vrae = VRAE(
         input_size=128,
         batch_size=batch_size,
         latent_size=64,
         learning_rate=0.001,
-        save_path="ckpt/sa_batches1",
-        num_layers=3,
+        save_path="ckpt/sa_2_batches4_expin_randstate",
+        num_layers=4,
         hidden_size=64
     )
 
@@ -24,7 +24,7 @@ if __name__ == "__main__":
 
     batch = timit.batch_generator(batch_size)
     avg_loss = 0
-    num_batches = 1 * 600*2 // batch_size
+    num_batches = 10 * 600*2 // batch_size
     for i in range(num_batches):
         start_time = time.time()
         batch_input = [example[0][:,:] for example in next(batch)]
