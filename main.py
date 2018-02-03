@@ -5,16 +5,16 @@ import numpy as np
 import time
 
 if __name__ == "__main__":
-    timit = TIMITDataset('./TIMIT', fft_size=128, window_size=128, thresh=3)
+    timit = TIMITDataset('./TIMIT', fft_size=512, window_size=256, thresh=3)
     #timit.preprocess_spectrograms()
-    batch_size = 2
+    batch_size = 8
     vrae = VRAE(
-        input_size=128,
+        input_size=512,
         batch_size=batch_size,
-        latent_size=64,
-        learning_rate=0.001,
-        save_path="ckpt/sa_2_batches4_expin_randstate",
-        num_layers=4,
+        latent_size=10,
+        learning_rate=0.005,
+        save_path="ckpt/sa_2_001_10_512_256_dynam_decode",
+        num_layers=2,
         hidden_size=64
     )
 
@@ -29,9 +29,10 @@ if __name__ == "__main__":
         start_time = time.time()
         batch_input = [example[0][:,:] for example in next(batch)]
         max_seq_length = max(x.shape[0] for x in batch_input)
-        bi_arr = np.zeros((batch_size, max_seq_length, 128))
+        bi_arr = np.zeros((batch_size, max_seq_length, 512))
         for j, example in enumerate(batch_input):
-            bi_arr[j, :example.shape[0], :example.shape[1]] = example
+            normed_ex = (example - np.min(example)) / (np.max(example) - np.min(example))
+            bi_arr[j, :example.shape[0], :example.shape[1]] = normed_ex
         loss, kl, rloss = vrae.train_batch(bi_arr, [max_seq_length]*batch_size, i)
         avg_loss = (avg_loss * i + loss) / (i + 1)
         diff = time.time() - start_time
