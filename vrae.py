@@ -90,8 +90,8 @@ class VRAE(object):
                 [LSTMCell(self.input_size, state_is_tuple=True) for _ in range(self.num_layers)],
                 state_is_tuple=True
             )
-            #state = tf.random_normal((self.batch_size, self.input_size))
-            #initial_state = (LSTMStateTuple(state, state),) * self.num_layers
+            state = tf.random_normal((self.batch_size, self.input_size))
+            initial_state = (LSTMStateTuple(state, state),) * self.num_layers
             #initial_state = in_cell.zero_state(self.batch_size, tf.float32)
 
             # using length we select the last output per sequence which
@@ -100,16 +100,20 @@ class VRAE(object):
             self.enc_outs, self.enc_state = tf.nn.dynamic_rnn(
                 in_cell,
                 inputs=sequence,
-                #initial_state=initial_state,
+                initial_state=initial_state,
                 sequence_length=self.length,
                 dtype=tf.float32
             )
             length = tf.squeeze(self.length)
             tf.Print(self.enc_state, [self.enc_state])
-            return tf.gather_nd(
+            last_state = self.enc_state[0]
+            last_c = tf.gather_nd(
                 self.enc_outs,
                 tf.stack([tf.range(self.batch_size), length - 1], axis=1)
             )
+            last_h = tf.convert_to_tensor(last_state.h)
+            catted = tf.concat([last_c, last_h], 1)
+            return catted
             #tf.convert_to_tensor(self.enc_state[1].c)
 
 
@@ -159,7 +163,7 @@ class VRAE(object):
                decoder=decoder,
                output_time_major=False,
                impute_finished=True,
-               maximum_iterations=1000)
+               maximum_iterations=tf.reduce_max(self.length))
             return dec_outs
 
 
@@ -189,7 +193,8 @@ class VRAE(object):
             #L2 distance for input to output
             dist = self.batch_input - sequence_output
             d2 = .5 * dist ** 2
-            tf.summary.image("zeros_feed", tf.expand_dims(self.zeros_out[1], 3), max_outputs=1)
+            for i in range(2):
+                tf.summary.image("zeros_feed{}".format(i), tf.expand_dims(self.zeros_out[i], 3), max_outputs=1)
             tf.summary.image("input", tf.expand_dims(self.batch_input, 3), max_outputs=1)
             tf.summary.image("dist", tf.expand_dims(d2, 3), max_outputs=1)
             tf.summary.image("output", tf.expand_dims(sequence_output, 3), max_outputs=1)
@@ -236,21 +241,21 @@ class VRAE(object):
 
 
     def train_batch(self, batch, lengths, i):
-        summary, opt, loss, kl, rloss, length, enc = self.sess.run(
+        summary, opt, loss, kl, rloss, length, enc, z = self.sess.run(
             (self.summary_op,
             self.train_step,
             self.loss,
             self.kl_divergence,
             self.reconstr_loss,
             self.length,
-            self.enc_state),
+            self.enc_state,
+            self.z),
             feed_dict={
                 self.batch_input: batch,
                 self.length: lengths
             }
         )
-        for x in enc:
-            print(x)
+        print(z)
         print(length)
         self.summary_writer.add_summary(summary, i)
         #self.saver.save(self.sess, file_path, global_step=step)
