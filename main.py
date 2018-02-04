@@ -13,8 +13,8 @@ if __name__ == "__main__":
         batch_size=batch_size,
         latent_size=10,
         learning_rate=0.001,
-        save_path="ckpt/sa_32_1lay_really_amended_512_lr001_lat10",
-        num_layers=1,
+        save_path="ckpt/sa_32_4lay_mul_states_512_lr001_lat10_full_kl",
+        num_layers=4,
         hidden_size=128
     )
 

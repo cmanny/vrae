@@ -68,21 +68,29 @@ class VRAE(object):
         self.saver = tf.train.Saver(tf.global_variables(), max_to_keep=100)
         self.summary_writer = tf.summary.FileWriter(save_path, self.sess.graph)
 
-    def _recognizer(self, x):
+    def _recognizer(self, xs):
         with tf.name_scope("recognizer") as scope:
-            hidden = tf.nn.softplus(linear(x, self.hidden_size, 'r_x_to_hidden'))
-            hidden2 = tf.nn.softplus(linear(hidden, self.hidden_size, 'r_hidden_to_hidden'))
-            mean = linear(hidden2, self.latent_size, 'r_hidden_to_mean')
-            log_var = linear(hidden2, self.latent_size, 'r_hidden_to_var')
-            return mean, log_var
+            means_and_vars = []
+            for i, x in enumerate(xs):
+                with tf.variable_scope("x_{}".format(i)):
+                    hidden = tf.nn.softplus(linear(x, self.hidden_size, 'r_x_to_hidden'))
+                    hidden2 = tf.nn.softplus(linear(hidden, self.hidden_size, 'r_hidden_to_hidden'))
+                    mean = linear(hidden2, self.latent_size, 'r_hidden_to_mean')
+                    log_var = linear(hidden2, self.latent_size, 'r_hidden_to_var')
+                    means_and_vars.append((mean, log_var))
+            return means_and_vars
 
 
-    def _generator(self, z):
+    def _generator(self, zs):
         with tf.name_scope("generator") as scope:
-            hidden = tf.nn.softplus(linear(z, self.hidden_size, 'g_z_to_hidden'))
-            hidden2 = tf.nn.softplus(linear(hidden, self.hidden_size, 'g_hidden_to_hidden'))
-            self.x_reconstructed = linear(hidden2, self.input_size, 'g_hidden_to_x')
-            return self.x_reconstructed
+            reconstructed_xs = []
+            for i, z in enumerate(zs):
+                with tf.variable_scope("z_{}".format(i)):
+                    hidden = tf.nn.softplus(linear(z, self.hidden_size, 'g_z_to_hidden'))
+                    hidden2 = tf.nn.softplus(linear(hidden, self.hidden_size, 'g_hidden_to_hidden'))
+                    x_reconstructed = linear(hidden2, self.input_size, 'g_hidden_to_x')
+                    reconstructed_xs.append(x_reconstructed)
+            return reconstructed_xs
 
     def _rnn_encoder(self, sequence):
         with tf.variable_scope("sequence_encoder"):
@@ -105,30 +113,31 @@ class VRAE(object):
                 dtype=tf.float32
             )
             length = tf.squeeze(self.length)
-            tf.Print(self.enc_state, [self.enc_state])
-            last_state = self.enc_state[0]
+
             last_c = tf.gather_nd(
                 self.enc_outs,
                 tf.stack([tf.range(self.batch_size), length - 1], axis=1)
             )
-            last_h = tf.convert_to_tensor(last_state.h)
-            catted = tf.concat([last_c, last_h], 1)
-            return catted
+            hidden_states = []
+            for tup in self.enc_state:
+                last_h = tf.convert_to_tensor(tup.h)
+                hidden_states.append(last_h)
+            return hidden_states + [last_c]
             #tf.convert_to_tensor(self.enc_state[1].c)
 
 
-    def _rnn_decoder(self, state):
+    def _rnn_decoder(self, states, initial_input):
         with tf.variable_scope("sequence_decoder"):
             out_cell = MultiRNNCell(
                 [LSTMCell(self.input_size, state_is_tuple=True) for _ in range(self.num_layers)],
                 state_is_tuple=True
             )
             # state = tf.random_normal((self.batch_size, self.input_size))
-            initial_state = (LSTMStateTuple(state, state),) * self.num_layers
+            initial_state = tuple(LSTMStateTuple(state, state) for state in states)
             #initial_state = out_cell.zero_state(self.batch_size, tf.float32)
             #inputs = tf.random_normal((self.batch_size, tf.reduce_max(self.length), self.input_size))
             inputs = tf.concat([
-                tf.zeros((self.batch_size, 1, self.input_size)),
+                tf.expand_dims(initial_input, 1),
                 self.batch_input[:, :tf.reduce_max(self.length) - 1, :]
             ], axis=1)
 
@@ -147,7 +156,7 @@ class VRAE(object):
                 lambda out: out,
                 [self.input_size],
                 tf.float32,
-                tf.zeros((self.batch_size, self.input_size)),
+                initial_input,
                 lambda end: [False] * self.batch_size
             )
             # helper = InferenceHelper(
@@ -169,24 +178,27 @@ class VRAE(object):
 
     def _build_model(self, sequence_input):
         bn = batch_norm(self.batch_size)
-        sequence_vector = self._rnn_encoder(bn(sequence_input))
-        self.in_mean, self.in_log_var = self._recognizer(sequence_vector)
-        tf.summary.histogram("in_mean", self.in_mean)
-        tf.summary.histogram("in_log_var", self.in_log_var)
+        states_and_output = self._rnn_encoder(bn(sequence_input))
+        self.means_and_vars = self._recognizer(states_and_output)
+        zs = []
+        for i, (mean, var) in enumerate(self.means_and_vars):
+            tf.summary.histogram("in_mean{}".format(i), mean)
+            tf.summary.histogram("in_log_var{}".format(i), var)
 
-        # # Sample step
-        epsilon = tf.random_normal(
-            [self.batch_size, self.latent_size],
-            0, 1, dtype=tf.float32
-        )
-        self.z = self.in_mean + epsilon * tf.sqrt(tf.exp(self.in_log_var))
-        tf.summary.histogram("z", self.z)
-        # #
+            # # Sample step
+            epsilon = tf.random_normal(
+                [self.batch_size, self.latent_size],
+                0, 1, dtype=tf.float32
+            )
+            z = mean + epsilon * tf.sqrt(tf.exp(var))
+            tf.summary.histogram("z_{}".format(i), z)
+            zs.append(z)
+            # #
 
-        decoded_state = self._generator(self.z)
-        self.sequence_output = self._rnn_decoder(decoded_state)
+        ds = self._generator(zs)
+        self.sequence_output = self._rnn_decoder(ds[:-1], ds[-1])
 
-        return self.sequence_output, self.z
+        return self.sequence_output, zs
 
     def _build_loss_optimizer(self, sequence_output):
         with tf.name_scope("optimizer"):
@@ -207,11 +219,14 @@ class VRAE(object):
 
             # We want to match p = N(0, 1) with q = N(in_mean, in_var)
             # using the KL divergence
-            self.kl_divergence = .5 * tf.reduce_mean(
-                self.in_log_var
-                + (1 + self.in_mean ** 2) / tf.exp(self.in_log_var)
-                - 1
-            )
+            self.kl_divergence = 0
+            for mean, log_var in self.means_and_vars:
+                self.kl_divergence += .5 * tf.reduce_mean(
+                    log_var
+                    + (1 + mean ** 2) / tf.exp(log_var)
+                    - 1
+                )
+            self.kl_divergence /= len(self.means_and_vars)
             # Alternatively use the reverse-KL
             # self.kl_divergence = .5 * tf.reduce_mean(
             #     - self.in_log_var
@@ -241,7 +256,7 @@ class VRAE(object):
 
 
     def train_batch(self, batch, lengths, i):
-        summary, opt, loss, kl, rloss, length, enc, z = self.sess.run(
+        summary, opt, loss, kl, rloss, length, enc, m_v = self.sess.run(
             (self.summary_op,
             self.train_step,
             self.loss,
@@ -249,14 +264,12 @@ class VRAE(object):
             self.reconstr_loss,
             self.length,
             self.enc_state,
-            self.z),
+            self.means_and_vars),
             feed_dict={
                 self.batch_input: batch,
                 self.length: lengths
             }
         )
-        print(z)
-        print(length)
         self.summary_writer.add_summary(summary, i)
         #self.saver.save(self.sess, file_path, global_step=step)
         return loss, kl, rloss
