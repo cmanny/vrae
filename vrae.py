@@ -42,13 +42,15 @@ class VRAE(object):
                 hidden_size=128,
                 sequence_lengths=None,
                 learning_rate=0.001,
-                save_path="ckpt/default"):
+                save_path="ckpt/default",
+                keep_prob=0.9):
         self.latent_size = latent_size
         self.num_layers = num_layers
         self.batch_size = batch_size
         self.learning_rate = learning_rate
         self.input_size = input_size
         self.hidden_size = hidden_size
+        self.keep_prob = keep_prob
 
         self.batch_input = tf.placeholder(
             tf.float32,
@@ -86,8 +88,14 @@ class VRAE(object):
             reconstructed_xs = []
             for i, z in enumerate(zs):
                 with tf.variable_scope("z_{}".format(i)):
-                    hidden = tf.nn.softplus(linear(z, self.hidden_size, 'g_z_to_hidden'))
-                    hidden2 = tf.nn.softplus(linear(hidden, self.hidden_size, 'g_hidden_to_hidden'))
+                    hidden = tf.nn.dropout(
+                        tf.nn.softplus(linear(z, self.hidden_size, 'g_z_to_hidden')),
+                        self.keep_prob
+                    )
+                    hidden2 = tf.nn.dropout(
+                        tf.nn.softplus(linear(hidden, self.hidden_size, 'g_hidden_to_hidden')),
+                        self.keep_prob
+                    )
                     x_reconstructed = linear(hidden2, self.input_size, 'g_hidden_to_x')
                     reconstructed_xs.append(x_reconstructed)
             return reconstructed_xs
@@ -97,6 +105,11 @@ class VRAE(object):
             in_cell = MultiRNNCell(
                 [LSTMCell(self.input_size, state_is_tuple=True) for _ in range(self.num_layers)],
                 state_is_tuple=True
+            )
+            in_cell = tf.contrib.rnn.DropoutWrapper(
+                in_cell,
+                output_keep_prob=self.keep_prob,
+                state_keep_prob=self.keep_prob
             )
             state = tf.random_normal((self.batch_size, self.input_size))
             initial_state = (LSTMStateTuple(state, state),) * self.num_layers
@@ -236,7 +249,7 @@ class VRAE(object):
             # )
 
             # Total loss, could use beta value to play with beta-vae
-            self.loss = 10000 * self.reconstr_loss + self.kl_divergence
+            self.loss = self.reconstr_loss + self.kl_divergence
             tvars = tf.trainable_variables()
             grads = tf.gradients(self.loss, tvars)
             grads, _ = tf.clip_by_global_norm(grads, 4)

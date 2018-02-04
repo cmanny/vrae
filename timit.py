@@ -223,9 +223,9 @@ class TIMITDataset(object):
         with closing(Pool(processes=num_cpus)) as pool:
             pool.map(self._make_spectrograms, splits)
 
-    def batch_generator(self, batch_size, spec=True):
+    def batch_generator(self, batch_size, spec=True, only_type=None):
         while True:
-            shuffled_list = self._spkr_sent_list(only_type="SA")
+            shuffled_list = self._spkr_sent_list(only_type=only_type)
             shuffle(shuffled_list)
             unused_queue = Queue()
             for x in shuffled_list:
