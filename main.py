@@ -20,8 +20,8 @@ if __name__ == "__main__":
         batch_size=batch_size,
         latent_size=8,
         learning_rate=0.001,
-        save_path="ckpt/full_mlv_8_lay_dropout_0.9_gen_3lay_lat8",
-        num_layers=8,
+        save_path="ckpt/full_mlv_4_lay_idrop_0.9_gen_3lay_lat8_lr001_hrl",
+        num_layers=4,
         hidden_size=128,
         keep_prob=0.9
     )

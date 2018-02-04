@@ -103,14 +103,16 @@ class VRAE(object):
     def _rnn_encoder(self, sequence):
         with tf.variable_scope("sequence_encoder"):
             in_cell = MultiRNNCell(
-                [LSTMCell(self.input_size, state_is_tuple=True) for _ in range(self.num_layers)],
+                [
+                    tf.contrib.rnn.DropoutWrapper(
+                        LSTMCell(self.input_size, state_is_tuple=True),
+                        output_keep_prob=self.keep_prob,
+                        state_keep_prob=self.keep_prob
+                    ) for _ in range(self.num_layers)
+                ],
                 state_is_tuple=True
             )
-            in_cell = tf.contrib.rnn.DropoutWrapper(
-                in_cell,
-                output_keep_prob=self.keep_prob,
-                state_keep_prob=self.keep_prob
-            )
+
             state = tf.random_normal((self.batch_size, self.input_size))
             initial_state = (LSTMStateTuple(state, state),) * self.num_layers
             #initial_state = in_cell.zero_state(self.batch_size, tf.float32)
@@ -226,7 +228,7 @@ class VRAE(object):
             tf.summary.image("enc_outs", tf.expand_dims(self.enc_outs, 3), max_outputs=1)
             # Calculate a per window loss per example
 
-            self.reconstr_loss = tf.reduce_mean(
+            self.reconstr_loss = 100 * tf.reduce_mean(
                 tf.reduce_sum(d2, [2, 1]) / tf.cast(self.length, tf.float32) / self.input_size
             )
 
@@ -252,16 +254,11 @@ class VRAE(object):
             self.loss = self.reconstr_loss + self.kl_divergence
             tvars = tf.trainable_variables()
             grads = tf.gradients(self.loss, tvars)
-            grads, _ = tf.clip_by_global_norm(grads, 4)
-
-
-            global_step = tf.Variable(0, trainable=False)
-            lr = tf.train.exponential_decay(self.learning_rate, global_step, 100, 0.9, staircase=False)
+            grads, _ = tf.clip_by_global_norm(grads, 1)
             # And apply the gradients
             optimizer = tf.train.AdamOptimizer(self.learning_rate)
             gradients = zip(grads, tvars)
-            self.train_step = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss, var_list=tvars)
-            increment_global_step_op = tf.assign(global_step, global_step+1)
+            self.train_step = optimizer.apply_gradients(gradients)
 
             tf.summary.scalar("total_loss", self.loss)
             tf.summary.scalar("kl_divergence", self.kl_divergence)
