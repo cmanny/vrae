@@ -234,7 +234,7 @@ class TIMITDataset(object):
                 if unused_queue.qsize() < batch_size:
                     break
                 items = [unused_queue.get() for _ in range(batch_size)]
-                yield [self.get_sentence_data(x[0], x[1], spec=spec) for x in items]
+                yield [(self.get_sentence_data(x[0], x[1], spec=spec), self.speakers[x[0]]) for x in items]
         yield None
 
 

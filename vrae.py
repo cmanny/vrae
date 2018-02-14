@@ -51,6 +51,7 @@ class VRAE(object):
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.keep_prob = keep_prob
+        self.save_path = save_path
 
         self.batch_input = tf.placeholder(
             tf.float32,
@@ -195,7 +196,7 @@ class VRAE(object):
         bn = batch_norm(self.batch_size)
         states_and_output = self._rnn_encoder(bn(sequence_input))
         self.means_and_vars = self._recognizer(states_and_output)
-        zs = []
+        self.zs = []
         for i, (mean, var) in enumerate(self.means_and_vars):
             tf.summary.histogram("in_mean{}".format(i), mean)
             tf.summary.histogram("in_log_var{}".format(i), var)
@@ -207,13 +208,13 @@ class VRAE(object):
             )
             z = mean + epsilon * tf.sqrt(tf.exp(var))
             tf.summary.histogram("z_{}".format(i), z)
-            zs.append(z)
+            self.zs.append(z)
             # #
 
-        ds = self._generator(zs)
+        ds = self._generator(self.zs)
         self.sequence_output = self._rnn_decoder(ds[:-1], ds[-1])
 
-        return self.sequence_output, zs
+        return self.sequence_output, self.zs
 
     def _build_loss_optimizer(self, sequence_output):
         with tf.name_scope("optimizer"):
@@ -284,9 +285,32 @@ class VRAE(object):
         #self.saver.save(self.sess, file_path, global_step=step)
         return loss, kl, rloss
 
+    def recognize(self, batch, lengths):
+        zs = self.sess.run(
+            self.zs,
+            feed_dict={
+                self.batch_input: batch,
+                self.length: lengths
+            }
+        )
+        return zs
+
+    def generate(self, zs, lengths):
+        out = self.sess.run(
+            self.zeros_out,
+            feed_dict={
+                self.batch_input: batch,
+                self.length: lengths
+            }
+        )
+        return out
+
     def load(self, file_path):
-        ckpt = tf.train.get_checkpoint_state(file_path)
-        self.saver.restore(self.sess, file_path+'/'+ckpt.model_checkpoint_path)
+        self.saver.restore(self.sess, file_path)
+
+    def save(self, i):
+        self.saver.save(self.sess, self.save_path, global_step=i)
+
 
 if __name__ == "__main__":
     vrae = VRAE()
